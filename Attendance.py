@@ -1,80 +1,117 @@
 import cv2
-import numpy as np
 import face_recognition
 import os
 from datetime import datetime
+import pyttsx3
+import logging
 
-# from PIL import ImageGrab
+# Initialize the text-to-speech engine
+engine = pyttsx3.init()
 
-path = 'ImagesAttendance'
-images = []
-classNames = []
-myList = os.listdir(path)
-print(myList)
-for cl in myList:
-    curImg = cv2.imread(f'{path}/{cl}')
-    images.append(curImg)
-    classNames.append(os.path.splitext(cl)[0])
-print(classNames)
+# Initialize a logger for error and event logging
+logging.basicConfig(filename='attendance.log', level=logging.INFO)
 
+# Function to mark attendance for known persons
+def mark_attendance(name):
+    try:
+        if name != "Unknown":
+            with open('Attendance.csv', 'a') as f:
+                now = datetime.now()
+                dt_string = now.strftime('%H:%M:%S')
+                f.write(f'{name},{dt_string}\n')
+                log_attendance_event(name)  # Log attendance event
+    except FileNotFoundError:
+        log_error("File 'Attendance.csv' not found")  # Log the error
+    except Exception as e:
+        log_error(f'Error while marking attendance: {str(e)}')  # Log the error
 
-def findEncodings(images):
-    encodeList = []
-    for img in images:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        encode = face_recognition.face_encodings(img)[0]
-        encodeList.append(encode)
-    return encodeList
+# Function to retrieve records for multiple persons by names (case-insensitive)
+def get_records_by_names(names):
+    records = []
+    try:
+        with open('Attendance.csv', 'r') as f:
+            for line in f:
+                parts = line.strip().split(',')
+                if len(parts) == 2 and parts[0].lower() in [name.lower() for name in names]:
+                    records.append(line.strip())
+    except FileNotFoundError:
+        records.append(f"File 'Attendance.csv' not found")
+    except Exception as e:
+        records.append(f"Error occurred: {str(e)}")
 
+    if not records:
+        for name in names:
+            records.append(f"{name}, No record found")
+    return records
 
-def markAttendance(name):
-    with open('Attendance.csv', 'r+') as f:
-        myDataList = f.readlines()
-        nameList = []
-        for line in myDataList:
-            entry = line.split(',')
-            nameList.append(entry[0])
-        if name not in nameList:
-            now = datetime.now()
-            dtString = now.strftime('%H:%M:%S')
-            f.writelines(f'\n{name},{dtString}')
+# Function to log attendance events
+def log_attendance_event(name):
+    logging.info(f'Attendance marked for {name}')
 
+# Function to log errors
+def log_error(message):
+    logging.error(message)
 
-# FOR CAPTURING SCREEN RATHER THAN WEBCAM
-# def captureScreen(bbox=(300,300,690+300,530+300)):
-#     capScr = np.array(ImageGrab.grab(bbox))
-#     capScr = cv2.cvtColor(capScr, cv2.COLOR_RGB2BGR)
-#     return capScr
+# Function to recognize faces in the current frame and play voice messages
+def recognize_faces(frame, known_faces, known_names, confidence_threshold=0.6):
+    try:
+        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+        rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
-encodeListKnown = findEncodings(images)
-print('Encoding Complete')
+        face_locations = face_recognition.face_locations(rgb_frame)
+        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
 
-cap = cv2.VideoCapture(0)
+        for face_encoding, (top, right, bottom, left) in zip(face_encodings, face_locations):
+            matches = face_recognition.compare_faces(known_faces, face_encoding)
+            name = "Unknown"
 
-while True:
-    success, img = cap.read()
-    # img = captureScreen()
-    imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
-    imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
+            if any(matches):
+                confidence_values = face_recognition.face_distance(known_faces, face_encoding)
+                match_index = matches.index(True)
 
-    facesCurFrame = face_recognition.face_locations(imgS)
-    encodesCurFrame = face_recognition.face_encodings(imgS, facesCurFrame)
+                if confidence_values[match_index] <= confidence_threshold:
+                    name = known_names[match_index]
+                    engine.say("Identity confirmed, and Attendance Marked")
+                else:
+                    engine.say("Not Registered")
+            else:
+                engine.say("Not Registered")
 
-    for encodeFace, faceLoc in zip(encodesCurFrame, facesCurFrame):
-        matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
-        faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
-        # print(faceDis)
-        matchIndex = np.argmin(faceDis)
+            mark_attendance(name)
 
-        if matches[matchIndex]:
-            name = classNames[matchIndex].upper()
-            # print(name)
-            y1, x2, y2, x1 = faceLoc
-            y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
-            cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
-            markAttendance(name)
+            log_attendance_event(name)  # Log attendance event
+    except Exception as e:
+        log_error(f'Error while recognizing faces: {str(e)}')  # Log the error
 
-    cv2.imshow('Webcam', img)
-    cv2.waitKey(1)
+    engine.runAndWait()
+
+def main():
+    try:
+        # Load known faces and other setup (not shown in this snippet)
+
+        cap = cv2.VideoCapture(0)  # Initialize camera capture
+
+        while True:
+            ret, frame = cap.read()  # Capture a frame from the camera
+
+            if not ret:
+                break  # Exit the loop if frame capture fails
+
+            # Call the recognize_faces function to recognize faces in the frame
+            recognize_faces(frame, known_faces, known_names, confidence_threshold=0.6)
+
+    except KeyboardInterrupt:
+        # Handle a user interrupt (e.g., Ctrl+C) gracefully
+        print("User interrupted the application.")
+    except Exception as e:
+        # Handle unexpected errors and log them
+        print(f"An unexpected error occurred: {str(e)}")
+
+    finally:
+        # Clean up resources even if an error occurred
+        cap.release()  # Release the camera
+        cv2.destroyAllWindows()  # Close any open windows
+
+if __name__ == "__main__":
+    main()
+

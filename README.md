@@ -1,3 +1,3 @@
-# Face Recognition Attendance Monitoring System
+# IdentityArmorX
 
-A Face Recognition Attendance project with high accuracy using OpenCV & Machine Learning that uses Webcam to detect faces and record the live attendance in an Excel Sheet.
+IdentityArmorX is an advanced and robust face recognition and identity protection system designed to enhance security and streamline identity management. Leveraging cutting-edge facial recognition technology, this innovative solution offers a comprehensive suite of features for diverse applications, from access control and attendance tracking to secure identity verification.
